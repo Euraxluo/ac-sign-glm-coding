@@ -47,29 +47,33 @@ async function send() {
   return opts.fetch("https://open.bigmodel.cn/api/anthropic/v1/messages", { method: "POST", body: JSON.stringify({ model: "GLM-5.3", messages: [] }) })
 }
 
-test("AutoClaw PoW stays decimal and leading-zero valid", () => {
+test("QuotaHub PoW stays decimal and leading-zero valid", () => {
   const pow = minePow("key", "session", "123")
   expect(pow).toMatch(/^\d+$/)
-  const challenge = createHash("sha256").update("key\nautoclaw\nsession\n123").digest("hex").slice(0, 32)
+  const challenge = createHash("sha256").update("key\nzcode\nsession\n123").digest("hex").slice(0, 32)
   expect(createHash("sha256").update(`${challenge}\n${pow}`).digest()[0]).toBe(0)
 })
 
-test("a model request carries AutoClaw's signed headers", async () => {
+test("a model request carries QuotaHub glmsign headers", async () => {
   const res = await send()
   expect(res.status).toBe(200)
   expect(sent).toHaveLength(1)
   expect(sent[0].headers.get("x-api-key")).toBe(KEY)
-  expect(sent[0].headers.get("x-app-id")).toBe("autoclaw")
-  expect(sent[0].headers.get("x-client-version")).toBe("2.1.0")
+  expect(sent[0].headers.get("x-app-id")).toBe("zcode")
+  expect(sent[0].headers.get("x-client-version")).toBe("3.4.0")
+  expect(sent[0].headers.get("x-product")).toBe("zcode")
+  expect(sent[0].headers.get("user-agent")).toBe("ZCode/3.4.0")
+  expect(sent[0].headers.get("x-client-type")).toBe("pc")
+  expect(sent[0].headers.get("x-request-model")).toBe("GLM-5.3")
   expect(sent[0].headers.get("x-client-pow")).toMatch(/^\d+$/)
   expect(sent[0].headers.get("x-session-id")).toMatch(/^[0-9a-f]{32}$/)
   const signature = Buffer.from(sent[0].headers.get("x-client-sig"), "base64")
   const publicKey = createPublicKey(createPrivateKey({ key: DER, format: "der", type: "pkcs8" }))
-  const message = `one\n${sent[0].headers.get("x-client-ts")}\n2.1.0\n${sent[0].headers.get("x-session-id")}\n${sent[0].headers.get("x-client-nonce")}`
+  const message = `one\n${sent[0].headers.get("x-client-ts")}\n3.4.0\n${sent[0].headers.get("x-session-id")}\n${sent[0].headers.get("x-client-nonce")}`
   expect(cryptoVerify(null, Buffer.from(message), publicKey, signature)).toBe(true)
 })
 
-test("handshake uses apiKey and AutoClaw identity", async () => {
+test("handshake uses apiKey and QuotaHub identity", async () => {
   const captures = []
   globalThis.fetch = async (input, init) => {
     const url = new URL(String(input))

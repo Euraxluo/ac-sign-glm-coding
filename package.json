@@ -1,7 +1,7 @@
 {
   "name": "@euraxluo/ac-sign-glm-coding",
-  "version": "0.2.0",
-  "description": "Private AutoClaw 2.1.0-compatible BigModel GLM Coding Plan signed provider",
+  "version": "0.3.0",
+  "description": "Private QuotaHub glmsign-compatible BigModel GLM Coding Plan signed provider",
   "type": "module",
   "main": "./index.mjs",
   "exports": "./index.mjs",

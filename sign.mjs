@@ -13,10 +13,12 @@ import {
 const UPSTREAM = "https://open.bigmodel.cn"
 const HANDSHAKE_PATH = "/api/paas/c1f3a7e2/v2/client"
 const KDF_SALT = "WD_CLIENT_SIGN_KDF_SALT"
-const APP_ID = "autoclaw"
-const VERSION = "2.1.0"
+const APP_ID = "zcode"
+const VERSION = "3.4.0"
+const UA = "ZCode/" + VERSION
 const POW_MAX = 5_000_000
-const KEY_TTL_MS = 6 * 60 * 60 * 1000
+const VERIFY_FAILURE_LIMIT = 2
+const VERIFY_FAILURE_WINDOW_MS = 10 * 60 * 1000
 
 function hkdf(secret, info, length = 32) {
   const prk = createHmac("sha256", KDF_SALT).update(secret).digest()
@@ -97,8 +99,9 @@ function writeKeyCache(path, keyID, secret, key) {
 
 export function createSigner({ apiKey, cachePath = "", fetchImpl = globalThis.fetch } = {}) {
   let credential = splitCredential(apiKey)
-  let key, sealedDER, fetchedAt, inflight
-  const setKey = (nextKey, sealed) => { key = nextKey; sealedDER = sealed; fetchedAt = Date.now() }
+  let key, sealedDER, inflight
+  let verifyFailures = []
+  let failOpen = false
 
   async function handshake() {
     const ts = String(Date.now())
@@ -123,10 +126,9 @@ export function createSigner({ apiKey, cachePath = "", fetchImpl = globalThis.fe
   }
 
   async function ensure() {
-    if (key && Date.now() - fetchedAt < KEY_TTL_MS) return
+    if (key) return
     if (sealedDER) {
       key = privateKeyFromDER(gcmOpen(cacheKey(credential.secret), sealedDER, credential.id))
-      fetchedAt = Date.now()
       return
     }
     inflight ??= handshake().finally(() => { inflight = undefined })
@@ -137,29 +139,51 @@ export function createSigner({ apiKey, cachePath = "", fetchImpl = globalThis.fe
     key = sealedDER = fetchedAt = undefined
   }
 
-  async function headers(sessionID) {
+  function noteVerifyFailure(reason) {
+    if (/VERIFY_POW_REQUIRED|VERIFY_POW_INVALID|VERIFY_TS_OUT_OF_WINDOW|VERIFY_MISSING_FIELD|VERIFY_INVALID_FORMAT|VERIFY_PROTOCOL_ERROR|VERIFY_APIKEY_DISABLED/.test(reason)) {
+      failOpen = true
+      return { action: "hard_stop", disabled: true }
+    }
+    const now = Date.now()
+    verifyFailures = verifyFailures.filter((x) => now - x.at < VERIFY_FAILURE_WINDOW_MS)
+    verifyFailures.push({ at: now, reason })
+    if (verifyFailures.length >= VERIFY_FAILURE_LIMIT) {
+      failOpen = true
+      return { action: "count_only", disabled: true }
+    }
+    return { action: "count_only", disabled: false }
+  }
+
+  async function headers(sessionID, model = "") {
+    if (failOpen) return null
     await ensure()
     const ts = String(Date.now())
-    const nonce = randomBytes(16).toString("hex")
+    const rnd = randomBytes(32)
+    const nonce = rnd.subarray(0, 16).toString("hex")
+    const requestID = rnd.subarray(16).toString("hex")
     const pow = minePow(credential.id, sessionID, ts)
-    const out = {
+    return {
       "X-Session-Id": sessionID,
       "X-Client-Ts": ts,
       "X-Client-Version": VERSION,
       "X-Client-Nonce": nonce,
       "X-Client-Sig": cryptoSign(null, Buffer.from(`${credential.id}\n${ts}\n${VERSION}\n${sessionID}\n${nonce}`), key).toString("base64"),
+      "X-App-Id": APP_ID,
+      "X-Client-Pow": pow,
+      "X-Product": APP_ID,
+      "User-Agent": UA,
+      "X-Client-Type": "pc",
+      "X-Request-Id": requestID,
+      "X-Request-Model": model,
     }
-    if (pow) {
-      out["X-App-Id"] = APP_ID
-      out["X-Client-Pow"] = pow
-    }
-    return out
   }
 
   return {
     headers,
     reset,
     ensure,
+    noteVerifyFailure,
+    isFailOpen() { return failOpen },
     bind(nextKey) {
       credential = splitCredential(nextKey)
       reset()
@@ -167,4 +191,4 @@ export function createSigner({ apiKey, cachePath = "", fetchImpl = globalThis.fe
   }
 }
 
-export const _internal = { APP_ID, VERSION, cacheKey, gcmOpen, gcmSeal, hkdf, privateKeyFromDER, readKeyCache, writeKeyCache, KEY_TTL_MS, POW_MAX }
+export const _internal = { APP_ID, VERSION, cacheKey, gcmOpen, gcmSeal, hkdf, privateKeyFromDER, readKeyCache, writeKeyCache, VERIFY_FAILURE_LIMIT, VERIFY_FAILURE_WINDOW_MS, POW_MAX }

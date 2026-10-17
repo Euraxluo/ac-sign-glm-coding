@@ -1,6 +1,6 @@
-// AutoClaw-compatible BigModel Coding Plan signing. This is a private fork:
-// unlike packages/zcode, it intentionally follows AutoClaw 2.1.0's client
-// identity and decimal PoW, matching the implementation long-used by QuotaHub.
+// QuotaHub glmsign port. This is a private fork preserving the stable
+// zcode 3.4.0 identity, decimal PoW, extra request headers, and fail-open
+// behavior that QuotaHub used for the 67%/33.5% signed channel.
 import { randomBytes } from "node:crypto"
 import { mkdirSync } from "node:fs"
 import { homedir } from "node:os"
@@ -152,17 +152,26 @@ export async function AutoClawCodingAuthPlugin() {
             const headers = new Headers(init?.headers)
             headers.set("x-api-key", key)
             headers.set("Authorization", `Bearer ${key}`)
+            let model = ""
+            try { model = String(JSON.parse(String(init?.body ?? "{}")).model ?? "") } catch {}
             const sessionID = randomBytes(16).toString("hex")
-            const signed = await signer.headers(sessionID)
-            for (const [name, value] of Object.entries(signed)) headers.set(name, value)
+            const signed = await signer.headers(sessionID, model)
+            for (const [name, value] of Object.entries(signed ?? {})) headers.set(name, value)
             let response = await fetch(input, { ...init, headers })
             if (response.status === 401) {
               const text = await response.text()
-              if (text.includes("VERIFY_SIGNATURE_INVALID") || text.includes("VERIFY_APIKEY_EXPIRED")) {
-                signer.reset()
-                const resigned = await signer.headers(sessionID)
-                for (const [name, value] of Object.entries(resigned)) headers.set(name, value)
-                response = await fetch(input, { ...init, headers })
+              const reason = (/VERIFY_[A-Z_]+/.exec(text) ?? [])[0] ?? ""
+              if (reason === "VERIFY_SIGNATURE_INVALID" || reason === "VERIFY_APIKEY_EXPIRED") {
+                const failure = signer.noteVerifyFailure(reason)
+                if (!failure.disabled) {
+                  signer.reset()
+                  const resigned = await signer.headers(sessionID, model)
+                  for (const [name, value] of Object.entries(resigned ?? {})) headers.set(name, value)
+                  response = await fetch(input, { ...init, headers })
+                } else response = new Response(text, { status: 401, statusText: response.statusText, headers: response.headers })
+              } else if (reason) {
+                signer.noteVerifyFailure(reason)
+                response = new Response(text, { status: 401, statusText: response.statusText, headers: response.headers })
               } else response = new Response(text, { status: 401, statusText: response.statusText, headers: response.headers })
             }
             return response
