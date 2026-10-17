@@ -172,6 +172,7 @@ export async function AutoClawCodingAuthPlugin() {
             }
             headers.set("x-api-key", key)
             headers.set("Authorization", `Bearer ${key}`)
+            headers.set("anthropic-version", "2023-06-01")
             let model = ""
             try { model = String(JSON.parse(String(init?.body ?? "{}")).model ?? "") } catch {}
             const sessionID = randomBytes(16).toString("hex")
