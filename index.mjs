@@ -155,7 +155,7 @@ export async function AutoClawCodingAuthPlugin() {
             let url = input instanceof Request ? input.url : String(input)
             if (url.includes("/v1/chat/completions")) {
               url = BASE + "/v1/messages"
-              init = { ...init, body: init?.body }
+              init = { ...init, body: init?.body, signal: undefined }
             }
             headers.set("x-api-key", key)
             headers.set("Authorization", `Bearer ${key}`)
