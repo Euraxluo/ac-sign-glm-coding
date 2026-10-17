@@ -1,10 +1,10 @@
 // AutoClaw 2.1.0 zhipu-client-sign port. Keep this implementation aligned
 // with the official client rather than the older QuotaHub zcode identity.
-import { randomBytes } from "node:crypto"
+import { createHash, randomBytes } from "node:crypto"
 import { mkdirSync } from "node:fs"
 import { homedir } from "node:os"
 import { join } from "node:path"
-import { createSigner, _internal } from "./sign.mjs"
+import { createSigner, splitCredential, _internal } from "./sign.mjs"
 
 const PROVIDER = "ac-sign-glm-coding"
 const BASE = "https://open.bigmodel.cn/api/anthropic"
@@ -107,22 +107,53 @@ async function codingUsage(key) {
 
 const signers = new Map()
 
-function cachePath() {
+function cachePath(key = "") {
   const root = process.env.XDG_CONFIG_HOME || join(homedir(), ".config")
-  return join(root, "magpie", "ac-sign-glm-coding-key.json")
+  const suffix = key ? createHash("sha256").update(key).digest("hex").slice(0, 16) : "default"
+  return join(root, "magpie", `ac-sign-glm-coding-${suffix}.json`)
 }
 
 function signerFor(key) {
   let entry = signers.get(key)
   if (!entry) {
-    mkdirSync(join(cachePath(), ".."), { recursive: true })
-    entry = createSigner({ apiKey: key, cachePath: cachePath() })
+    mkdirSync(join(cachePath(key), ".."), { recursive: true })
+    entry = createSigner({ apiKey: key, cachePath: cachePath(key) })
     signers.set(key, entry)
   }
   return entry
 }
 
-export async function AutoClawCodingAuthPlugin() {
+const selections = new Map()
+const SELECTION_TTL_MS = 5 * 60 * 1000
+
+function keysOf(auth, options) {
+  const explicit = Array.isArray(options?.keys) ? options.keys.map((key) => String(key).trim()).filter(Boolean) : []
+  if (explicit.length) return [...new Set(explicit)]
+  return String(auth?.key ?? "").split(/\r?\n/).map((key) => key.trim()).filter(Boolean)
+}
+
+async function selectKey(keys) {
+  const cacheKey = keys.join("\n")
+  const cached = selections.get(cacheKey)
+  if (cached && Date.now() - cached.at < SELECTION_TTL_MS) return cached
+  const cards = await Promise.all(keys.map(async (key) => {
+    try { return { key, card: await codingUsage(key) } } catch { return null }
+  }))
+  const usable = cards.filter(Boolean)
+  if (!usable.length) throw new Error("none of the BigModel keys could report usage")
+  // The signed coding-plan key whose entitlement ends soonest is the one to
+  // spend first; a key with no known term is kept behind every dated key.
+  const chosen = usable.sort((a, b) => {
+    const at = Date.parse(a.card.until ?? "") || Number.POSITIVE_INFINITY
+    const bt = Date.parse(b.card.until ?? "") || Number.POSITIVE_INFINITY
+    return at - bt || a.key.localeCompare(b.key)
+  })[0]
+  const selection = { at: Date.now(), ...chosen }
+  selections.set(cacheKey, selection)
+  return selection
+}
+
+export async function AutoClawCodingAuthPlugin(_client, options) {
   return {
     config: async (cfg) => {
       cfg.provider ??= {}
@@ -152,7 +183,9 @@ export async function AutoClawCodingAuthPlugin() {
       async loader(getAuth) {
         const auth = await getAuth()
         if (auth?.type !== "api" || !auth.key) return {}
-        const key = String(auth.key).trim()
+        const keys = keysOf(auth, options)
+        if (!keys.length) return {}
+        const key = keys.length === 1 ? keys[0] : (await selectKey(keys)).key
         const signer = signerFor(key)
         return {
           baseURL: BASE + "/v1",
@@ -210,7 +243,11 @@ export async function AutoClawCodingAuthPlugin() {
         const auth = await getAuth()
         if (auth?.type !== "api" || !auth.key) return { error: "not signed in", windows: [] }
         try {
-          return await codingUsage(String(auth.key).trim())
+          const keys = keysOf(auth, options)
+          if (!keys.length) return { error: "not signed in", windows: [] }
+          const selection = keys.length === 1 ? { key: keys[0], card: await codingUsage(keys[0]) } : await selectKey(keys)
+          if (keys.length > 1) selection.card.balance = `${keys.length} keys · serving ${selection.key.split(".")[0]}…`
+          return selection.card
         } catch (e) {
           return { error: `BigModel usage failed: ${e?.message ?? e}`, windows: [] }
         }
@@ -249,5 +286,5 @@ export async function AutoClawCodingAuthPlugin() {
   }
 }
 
-export const _internalPlugin = { PROVIDER, BASE, MODELS, cachePath, signerFor, signers, codingUsage, limitWindows, termOf }
+export const _internalPlugin = { PROVIDER, BASE, MODELS, cachePath, signerFor, signers, selections, keysOf, selectKey, codingUsage, limitWindows, termOf }
 export { _internal as _internalSign }

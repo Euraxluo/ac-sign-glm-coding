@@ -15,10 +15,10 @@ const sent = []
 const real = globalThis.fetch
 const DER = Buffer.from("MC4CAQAwBQYDK2VwBCIEINaofm94EHDBFTX6XkGlMUU8F41qb2mXKe/DMwUJbxCh", "base64")
 
-function sealedKey() {
-  const key = _internalSign.hkdf(Buffer.from("secret"), "ed25519_priv")
+function sealedKey(secret = "secret", keyId = "one") {
+  const key = _internalSign.hkdf(Buffer.from(secret), "ed25519_priv")
   const cipher = createCipheriv("aes-256-gcm", key, Buffer.alloc(12))
-  cipher.setAAD(Buffer.from("one"))
+  cipher.setAAD(Buffer.from(keyId))
   const der = Buffer.from("MC4CAQAwBQYDK2VwBCIEINaofm94EHDBFTX6XkGlMUU8F41qb2mXKe/DMwUJbxCh", "base64")
   return Buffer.concat([Buffer.alloc(12), cipher.update(Buffer.from(der.toString("base64"))), cipher.final(), cipher.getAuthTag()]).toString("base64")
 }
@@ -117,3 +117,40 @@ test("usage maps BigModel windows and the plan term", async () => {
   expect(card.windows[1]).toMatchObject({ name: "Weekly", amount: 500, limit: 1000, display: "500 / 1000" })
   expect(calls.filter((c) => c.url.host === "bigmodel.cn").every((c) => c.headers.get("authorization") === `Bearer ${KEY}`)).toBe(true)
 })
+
+test("multi-key usage and serving choose the earliest expiring key", async () => {
+  _internalPlugin.selections.clear()
+  const KEY_B = "two.secret"
+  globalThis.fetch = async (input, init) => {
+    const url = new URL(String(input))
+    const auth0 = new Headers(init?.headers).get("authorization") ?? ""
+    if (url.pathname === "/api/paas/c1f3a7e2/v2/client") {
+      const apiKey = JSON.parse(init?.body).apiKey
+      const [id, secret] = apiKey.split(".")
+      return Response.json({ code: 200, data: { privateCipher: sealedKey(secret, id) } })
+    }
+    if (url.pathname === "/api/monitor/usage/quota/limit") {
+      const auth = new Headers(init?.headers).get("authorization") ?? ""
+      return Response.json({ code: 200, data: { level: "max", limits: [{ unit: 3, number: 5, usage: 100, remaining: 50 }] } })
+    }
+    if (url.pathname === "/api/biz/subscription/list") {
+      const auth = new Headers(init?.headers).get("authorization") ?? ""
+      const valid = auth.endsWith(KEY_B) ? "2027-01-01 ~ 2027-01-10" : "2027-01-01 ~ 2027-01-20"
+      return Response.json({ code: 200, data: [{ status: "VALID", autoRenew: false, valid }] })
+    }
+    sent.push({ input: String(input), init, headers: new Headers(init?.headers) })
+    return Response.json({ ok: true })
+  }
+  const hooks = await AutoClawCodingAuthAuthPluginForMulti()
+  const card = await hooks.auth.usage(async () => ({ type: "api", key: `${KEY}\n${KEY_B}` }))
+  expect(card.balance).toBe("2 keys · serving two…")
+  const opts = await hooks.auth.loader(async () => ({ type: "api", key: `${KEY}\n${KEY_B}` }), { id: _internalPlugin.PROVIDER })
+  const res = await opts.fetch("https://open.bigmodel.cn/api/anthropic/v1/messages", { method: "POST", body: JSON.stringify({ model: "GLM-5.3", messages: [] }) })
+  expect(res.status).toBe(200)
+  expect(sent.at(-1).headers.get("x-api-key")).toBe(KEY_B)
+  expect(_internalPlugin.cachePath(KEY_B).endsWith("ac-sign-glm-coding-" + createHash("sha256").update(KEY_B).digest("hex").slice(0, 16) + ".json")).toBe(true)
+})
+
+async function AutoClawCodingAuthAuthPluginForMulti() {
+  return await AutoClawCodingAuthPlugin(undefined, {})
+}
