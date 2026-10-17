@@ -186,7 +186,7 @@ export async function AutoClawCodingAuthPlugin() {
             try { model = String(JSON.parse(String(init?.body ?? "{}")).model ?? "") } catch {}
             const sessionID = randomBytes(16).toString("hex")
             const hasAuthorization = headers.has("authorization")
-            const signed = await signer.headers(sessionID, hasAuthorization)
+            const signed = await signer.headers(sessionID, { hasAuthorization, model })
             for (const [name, value] of Object.entries(signed ?? {})) headers.set(name, value)
             let response = await fetch(url, { ...init, headers })
             if (response.status === 401) {
@@ -197,7 +197,7 @@ export async function AutoClawCodingAuthPlugin() {
                 const disabled = signer.noteVerifyFailure(reason, hardStop).disabled
                 const rekey = reason === "VERIFY_SIGNATURE_INVALID" || reason === "VERIFY_APIKEY_EXPIRED"
                 if (rekey && !disabled) {
-                  const resigned = await signer.headers(sessionID, hasAuthorization)
+                  const resigned = await signer.headers(sessionID, { hasAuthorization, model })
                   for (const [name, value] of Object.entries(resigned ?? {})) headers.set(name, value)
                   response = await fetch(url, { ...init, headers })
                 } else response = new Response(text, { status: 401, statusText: response.statusText, headers: response.headers })

@@ -7,6 +7,7 @@ import {
   createHmac,
   createPrivateKey,
   randomBytes,
+  randomUUID,
   sign as cryptoSign,
 } from "node:crypto"
 
@@ -181,7 +182,7 @@ export function createSigner({ apiKey, cachePath = "", fetchImpl = globalThis.fe
     return { action: immediate ? "hard_stop" : "count_only", disabled: true }
   }
 
-  async function headers(sessionID, hasAuthorization = false) {
+  async function headers(sessionID, { hasAuthorization = false, requestId = "", model = "" } = {}) {
     if (Date.now() < disabledUntil) return null
     await ensure()
     if (!key) return null
@@ -194,6 +195,12 @@ export function createSigner({ apiKey, cachePath = "", fetchImpl = globalThis.fe
       "X-Client-Version": VERSION,
       "X-Client-Nonce": nonce,
       "X-Client-Sig": cryptoSign(null, Buffer.from(`${credential.id}\n${ts}\n${VERSION}\n${sessionID}\n${nonce}`), key).toString("base64"),
+      // AutoClaw's model-request attribution layer (#810), captured on the
+      // same outgoing BigModel request as the signing headers.
+      "X-Product": APP_ID,
+      "X-Request-Id": requestId || randomUUID(),
+      "X-Request-Model": model,
+      "X-Client-Type": "pc",
     }
     if (pow) {
       out["X-App-Id"] = APP_ID
