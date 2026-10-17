@@ -1,6 +1,6 @@
 {
   "name": "@euraxluo/ac-sign-glm-coding",
-  "version": "0.7.1",
+  "version": "0.8.0",
   "description": "Private AutoClaw 2.1.0-aligned BigModel GLM Coding Plan signed provider",
   "type": "module",
   "main": "./index.mjs",
@@ -22,10 +22,5 @@
   "repository": {
     "type": "git",
     "url": "git+https://github.com/Euraxluo/ac-sign-glm-coding.git"
-  },
-  "magpie": {
-    "options": {
-      "keys": []
-    }
   }
 }
