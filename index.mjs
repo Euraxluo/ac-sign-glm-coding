@@ -1,6 +1,5 @@
-// QuotaHub glmsign port. This is a private fork preserving the stable
-// zcode 3.4.0 identity, decimal PoW, extra request headers, and fail-open
-// behavior that QuotaHub used for the 67%/33.5% signed channel.
+// AutoClaw 2.1.0 zhipu-client-sign port. Keep this implementation aligned
+// with the official client rather than the older QuotaHub zcode identity.
 import { randomBytes } from "node:crypto"
 import { mkdirSync } from "node:fs"
 import { homedir } from "node:os"
@@ -176,23 +175,22 @@ export async function AutoClawCodingAuthPlugin() {
             let model = ""
             try { model = String(JSON.parse(String(init?.body ?? "{}")).model ?? "") } catch {}
             const sessionID = randomBytes(16).toString("hex")
-            const signed = await signer.headers(sessionID, model)
+            const hasAuthorization = headers.has("authorization")
+            const signed = await signer.headers(sessionID, hasAuthorization)
             for (const [name, value] of Object.entries(signed ?? {})) headers.set(name, value)
             let response = await fetch(url, { ...init, headers })
             if (response.status === 401) {
               const text = await response.text()
               const reason = (/VERIFY_[A-Z_]+/.exec(text) ?? [])[0] ?? ""
-              if (reason === "VERIFY_SIGNATURE_INVALID" || reason === "VERIFY_APIKEY_EXPIRED") {
-                const failure = signer.noteVerifyFailure(reason)
-                if (!failure.disabled) {
-                  signer.reset()
-                  const resigned = await signer.headers(sessionID, model)
+              if (reason) {
+                const hardStop = /VERIFY_POW_REQUIRED|VERIFY_POW_INVALID|VERIFY_TS_OUT_OF_WINDOW|VERIFY_MISSING_FIELD|VERIFY_INVALID_FORMAT|VERIFY_PROTOCOL_ERROR|VERIFY_APIKEY_DISABLED/.test(reason)
+                const disabled = signer.noteVerifyFailure(reason, hardStop).disabled
+                const rekey = reason === "VERIFY_SIGNATURE_INVALID" || reason === "VERIFY_APIKEY_EXPIRED"
+                if (rekey && !disabled) {
+                  const resigned = await signer.headers(sessionID, hasAuthorization)
                   for (const [name, value] of Object.entries(resigned ?? {})) headers.set(name, value)
                   response = await fetch(url, { ...init, headers })
                 } else response = new Response(text, { status: 401, statusText: response.statusText, headers: response.headers })
-              } else if (reason) {
-                signer.noteVerifyFailure(reason)
-                response = new Response(text, { status: 401, statusText: response.statusText, headers: response.headers })
               } else response = new Response(text, { status: 401, statusText: response.statusText, headers: response.headers })
             }
             return response
