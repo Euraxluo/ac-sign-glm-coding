@@ -1,6 +1,6 @@
 {
   "name": "@euraxluo/ac-sign-glm-coding",
-  "version": "0.3.1",
+  "version": "0.4.0",
   "description": "Private QuotaHub glmsign-compatible BigModel GLM Coding Plan signed provider",
   "type": "module",
   "main": "./index.mjs",

@@ -154,8 +154,21 @@ export async function AutoClawCodingAuthPlugin() {
             // this plugin owns the Anthropic Messages endpoint explicitly.
             let url = input instanceof Request ? input.url : String(input)
             if (url.includes("/v1/chat/completions")) {
+              const body = JSON.parse(String(init?.body ?? "{}"))
+              const messages = Array.isArray(body.messages) ? body.messages : []
+              const converted = {
+                model: String(body.model ?? ""),
+                max_tokens: Number(body.max_tokens ?? 4096) || 4096,
+                stream: body.stream === true,
+                messages: messages.map((m) => ({
+                  role: m.role === "assistant" ? "assistant" : m.role === "tool" ? "user" : "user",
+                  content: Array.isArray(m.content)
+                    ? m.content.map((part) => part?.text ?? "").join("\n")
+                    : String(m.content ?? ""),
+                })),
+              }
               url = BASE + "/v1/messages"
-              init = { ...init, body: init?.body, signal: undefined }
+              init = { ...init, method: "POST", body: JSON.stringify(converted), signal: undefined }
             }
             headers.set("x-api-key", key)
             headers.set("Authorization", `Bearer ${key}`)
