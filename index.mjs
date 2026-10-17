@@ -130,8 +130,18 @@ export async function AutoClawCodingAuthPlugin() {
       cfg.provider[PROVIDER] ??= {
         name: "AC Signed GLM Coding",
         npm: "@ai-sdk/anthropic",
-        api: BASE,
-        models: MODELS,
+        api: BASE + "/v1",
+        models: Object.fromEntries(Object.entries(MODELS).map(([id, m]) => [id, {
+          id,
+          name: id,
+          reasoning: m.efforts.some((e) => e !== "none"),
+          tool_call: true,
+          attachment: false,
+          modalities: { input: ["text"], output: ["text"] },
+          limit: { context: m.context, output: m.output },
+          cost: { input: 0, output: 0, cache_read: 0, cache_write: 0 },
+          variants: Object.fromEntries(m.efforts.map((e) => [e, e === "none" ? { thinking: { type: "disabled" } } : { thinking: { type: "enabled", budgetTokens: e === "max" ? 31999 : e === "high" ? 16000 : 4096 } }])),
+        }])),
       }
     },
     auth: {
@@ -146,7 +156,7 @@ export async function AutoClawCodingAuthPlugin() {
         const key = String(auth.key).trim()
         const signer = signerFor(key)
         return {
-          baseURL: BASE,
+          baseURL: BASE + "/v1",
           async fetch(input, init) {
             const headers = new Headers(init?.headers)
             // magpie's gateway converter calls the OpenAI-compatible endpoint;
@@ -213,7 +223,28 @@ export async function AutoClawCodingAuthPlugin() {
     provider: {
       id: PROVIDER,
       async models(provider) {
-        return provider.models
+        return Object.fromEntries(Object.entries(provider.models ?? {}).map(([id, m]) => [id, {
+          id,
+          providerID: PROVIDER,
+          name: id,
+          api: { id, url: BASE + "/v1", npm: "@ai-sdk/anthropic" },
+          status: "active",
+          cost: { input: 0, output: 0, cache: { read: 0, write: 0 } },
+          limit: { context: m.limit?.context ?? 0, output: m.limit?.output ?? 0 },
+          options: {},
+          headers: {},
+          capabilities: {
+            temperature: true,
+            reasoning: !!m.reasoning,
+            attachment: false,
+            toolcall: true,
+            input: { text: true, image: false, audio: false, video: false, pdf: false },
+            output: { text: true, image: false, audio: false, video: false, pdf: false },
+            interleaved: false,
+          },
+          release_date: "",
+          variants: m.variants ?? {},
+        }]))
       },
     },
   }
