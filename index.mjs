@@ -19,7 +19,7 @@ const BIZ_API = "https://bigmodel.cn"
 async function call(method, url, key, signal) {
   const res = await fetch(url, {
     method,
-    headers: { Accept: "application/json", Authorization: key },
+    headers: { Accept: "application/json", Authorization: `Bearer ${key}` },
     signal,
   })
   const text = await res.text()
@@ -83,20 +83,19 @@ function beijing(s) {
   return Number.isFinite(t) ? t : 0
 }
 function termOf(subs) {
+  let earliest = null
   for (const x of Array.isArray(subs) ? subs : []) {
     if (String(x?.status ?? "").toUpperCase() !== "VALID") continue
     const auto = x.autoRenew === true || x.autoRenew === 1
-    const t = beijing(typeof x.nextRenewTime === "string" ? x.nextRenewTime : "")
-    if (t) return { until: new Date(t).toISOString(), renew: auto ? "auto" : "off" }
+    const next = beijing(typeof x.nextRenewTime === "string" ? x.nextRenewTime : "")
     const ds = String(typeof x.valid === "string" ? x.valid : "").match(/\d{4}-\d{2}-\d{2}(?:[ T]\d{2}:\d{2}:\d{2})?/g) ?? []
-    if (ds.length && !auto) {
-      const end = beijing(ds[ds.length - 1])
-      if (end) return { until: new Date(end).toISOString(), renew: "off" }
-    }
-    return {}
+    const validEnd = beijing(ds[ds.length - 1])
+    const t = next || (ds.length && !auto ? validEnd : 0)
+    if (t && (!earliest || t < earliest.at)) earliest = { at: t, auto }
   }
-  return {}
+  return earliest ? { until: new Date(earliest.at).toISOString(), renew: earliest.auto ? "auto" : "off" } : {}
 }
+
 async function codingUsage(key) {
   const d = (await call("GET", BIZ_API + "/api/monitor/usage/quota/limit", key)) ?? {}
   const out = {}

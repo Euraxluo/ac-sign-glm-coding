@@ -101,7 +101,10 @@ test("usage maps BigModel windows and the plan term", async () => {
       ] } })
     }
     if (url.pathname === "/api/biz/subscription/list") {
-      return Response.json({ code: 200, data: [{ status: "VALID", autoRenew: false, valid: "2026-10-01 ~ 2027-10-14" }] })
+      return Response.json({ code: 200, data: [
+        { status: "VALID", autoRenew: false, valid: "2026-10-01 ~ 2028-01-01" },
+        { status: "VALID", autoRenew: false, valid: "2026-10-01 ~ 2027-10-14" },
+      ] })
     }
     return Response.json({ ok: true })
   }
@@ -112,4 +115,5 @@ test("usage maps BigModel windows and the plan term", async () => {
   expect(card.windows).toHaveLength(2)
   expect(card.windows[0]).toMatchObject({ name: "5 hours", amount: 10, limit: 100, display: "10 / 100" })
   expect(card.windows[1]).toMatchObject({ name: "Weekly", amount: 500, limit: 1000, display: "500 / 1000" })
+  expect(calls.filter((c) => c.url.host === "bigmodel.cn").every((c) => c.headers.get("authorization") === `Bearer ${KEY}`)).toBe(true)
 })
