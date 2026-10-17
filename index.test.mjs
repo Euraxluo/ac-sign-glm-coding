@@ -84,3 +84,28 @@ test("handshake uses apiKey and AutoClaw identity", async () => {
   expect(captures[0].body.apiKey).toBe(KEY)
   expect(captures[0].headers.get("authorization")).toBe(`Bearer ${KEY}`)
 })
+
+test("usage maps BigModel windows and the plan term", async () => {
+  const calls = []
+  globalThis.fetch = async (input, init) => {
+    const url = new URL(String(input))
+    calls.push({ url, headers: new Headers(init?.headers) })
+    if (url.pathname === "/api/monitor/usage/quota/limit") {
+      return Response.json({ code: 200, data: { level: "max", limits: [
+        { unit: 3, number: 5, usage: 100, remaining: 90, nextResetTime: Date.now() + 3600_000 },
+        { unit: 6, number: 1, usage: 1000, remaining: 500, nextResetTime: Date.now() + 86400_000 },
+      ] } })
+    }
+    if (url.pathname === "/api/biz/subscription/list") {
+      return Response.json({ code: 200, data: [{ status: "VALID", autoRenew: false, valid: "2026-10-01 ~ 2027-10-14" }] })
+    }
+    return Response.json({ ok: true })
+  }
+  const hooks = await AutoClawCodingAuthPlugin()
+  const card = await hooks.auth.usage(async () => auth)
+  expect(card.plan).toBe("GLM Coding Max")
+  expect(card.until).toBe("2027-10-13T16:00:00.000Z")
+  expect(card.windows).toHaveLength(2)
+  expect(card.windows[0]).toMatchObject({ name: "5 hours", amount: 10, limit: 100, display: "10 / 100" })
+  expect(card.windows[1]).toMatchObject({ name: "Weekly", amount: 500, limit: 1000, display: "500 / 1000" })
+})
