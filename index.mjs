@@ -150,6 +150,13 @@ export async function AutoClawCodingAuthPlugin() {
           baseURL: BASE,
           async fetch(input, init) {
             const headers = new Headers(init?.headers)
+            // magpie's gateway converter calls the OpenAI-compatible endpoint;
+            // this plugin owns the Anthropic Messages endpoint explicitly.
+            let url = input instanceof Request ? input.url : String(input)
+            if (url.includes("/v1/chat/completions")) {
+              url = BASE + "/v1/messages"
+              init = { ...init, body: init?.body }
+            }
             headers.set("x-api-key", key)
             headers.set("Authorization", `Bearer ${key}`)
             let model = ""
@@ -157,7 +164,7 @@ export async function AutoClawCodingAuthPlugin() {
             const sessionID = randomBytes(16).toString("hex")
             const signed = await signer.headers(sessionID, model)
             for (const [name, value] of Object.entries(signed ?? {})) headers.set(name, value)
-            let response = await fetch(input, { ...init, headers })
+            let response = await fetch(url, { ...init, headers })
             if (response.status === 401) {
               const text = await response.text()
               const reason = (/VERIFY_[A-Z_]+/.exec(text) ?? [])[0] ?? ""
@@ -167,7 +174,7 @@ export async function AutoClawCodingAuthPlugin() {
                   signer.reset()
                   const resigned = await signer.headers(sessionID, model)
                   for (const [name, value] of Object.entries(resigned ?? {})) headers.set(name, value)
-                  response = await fetch(input, { ...init, headers })
+                  response = await fetch(url, { ...init, headers })
                 } else response = new Response(text, { status: 401, statusText: response.statusText, headers: response.headers })
               } else if (reason) {
                 signer.noteVerifyFailure(reason)
